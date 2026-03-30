@@ -1,0 +1,31 @@
+name: test_uygulama
+description: "Mesai Takip"
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.11.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+  # Veri görselleştirme için
+  fl_chart: ^0.66.0 
+  # Dil ve tarih formatları için
+  intl: ^0.19.0
+  # Verileri telefona kaydetmek için
+  shared_preferences: ^2.2.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
+  # Eğer ileride ikon veya resim eklersen burayı kullanacağız
+  # assets:
+  #   - assets/images/
