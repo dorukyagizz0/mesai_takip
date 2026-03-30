@@ -1,80 +1,70 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
-import 'package:intl/date_symbol_data_local.dart'; // Türkçe tarih için
+import 'package:intl/date_symbol_data_local.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+// Takvim ve dil desteği için bu paketleri eklemeyi unutma (pubspec.yaml içinde flutter_localizations olmalı)
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'dart:convert';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // 1. Türkçe dil desteğini başlatıyoruz
   await initializeDateFormatting('tr_TR', null);
   runApp(
     const MaterialApp(
-      home: YevmiyeTakipApp(),
+      home: AnaIskelet(),
       debugShowCheckedModeBanner: false,
+      title: "Mesai Takip",
+      // TAKVİMİN TÜRKÇE OLMASI İÇİN GEREKLİ AYARLAR
       localizationsDelegates: [
-        DefaultMaterialLocalizations.delegate,
-        DefaultWidgetsLocalizations.delegate,
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
       ],
+      supportedLocales: [Locale('tr', 'TR')],
+      locale: Locale('tr', 'TR'),
     ),
   );
 }
 
 class IsKaydi {
-  final DateTime tarih;
-  final TimeOfDay giris;
-  final TimeOfDay cikis;
-  final double saatlikUcret;
-  final double gemiPrimi;
+  String id;
+  DateTime girisZamani;
+  DateTime cikisZamani;
+  double saatlikUcret;
+  double gemiPrimi;
 
   IsKaydi({
-    required this.tarih,
-    required this.giris,
-    required this.cikis,
+    required this.id,
+    required this.girisZamani,
+    required this.cikisZamani,
     required this.saatlikUcret,
     required this.gemiPrimi,
   });
 
-  // Saat farkını hesaplayan formül
-  double get calismaSaati {
-    final double girisDakika = giris.hour * 60.0 + giris.minute;
-    final double cikisDakika = cikis.hour * 60.0 + cikis.minute;
-    double fark = (cikisDakika - girisDakika) / 60.0;
-    return fark > 0 ? fark : 0;
-  }
-
-  // HESAPLAMA BURADA: (Saat * Ücret) + Prim
+  double get calismaSaati =>
+      cikisZamani.difference(girisZamani).inMinutes / 60.0;
   double get toplamKazanc => (calismaSaati * saatlikUcret) + gemiPrimi;
 
   Map<String, dynamic> toJson() => {
-    'tarih': tarih.toIso8601String(),
-    'gH': giris.hour,
-    'gM': giris.minute,
-    'cH': cikis.hour,
-    'cM': cikis.minute,
+    'id': id,
+    'gZ': girisZamani.toIso8601String(),
+    'cZ': cikisZamani.toIso8601String(),
     'u': saatlikUcret,
     'p': gemiPrimi,
   };
-
   factory IsKaydi.fromJson(Map<String, dynamic> json) => IsKaydi(
-    tarih: DateTime.parse(json['tarih']),
-    giris: TimeOfDay(hour: json['gH'], minute: json['gM']),
-    cikis: TimeOfDay(hour: json['cH'], minute: json['cM']),
-    saatlikUcret: json['u'],
-    gemiPrimi: json['p'],
+    id: json['id'] ?? DateTime.now().millisecondsSinceEpoch.toString(),
+    girisZamani: DateTime.parse(json['gZ']),
+    cikisZamani: DateTime.parse(json['cZ']),
+    saatlikUcret: json['u'].toDouble(),
+    gemiPrimi: json['p'].toDouble(),
   );
 }
 
-class YevmiyeTakipApp extends StatefulWidget {
-  const YevmiyeTakipApp({super.key});
-  @override
-  State<YevmiyeTakipApp> createState() => _YevmiyeTakipAppState();
-}
-
-class _YevmiyeTakipAppState extends State<YevmiyeTakipApp> {
+class _AnaIskeletState extends State<AnaIskelet> {
+  int _seciliSayfa = 0;
   List<IsKaydi> _kayitlar = [];
-  bool _loading = true;
 
   @override
   void initState() {
@@ -84,290 +74,304 @@ class _YevmiyeTakipAppState extends State<YevmiyeTakipApp> {
 
   Future<void> _verileriYukle() async {
     final prefs = await SharedPreferences.getInstance();
-    final String? data = prefs.getString('yevmiye_v2');
+    final String? data = prefs.getString('mesai_v7');
     if (data != null) {
       final List decoded = json.decode(data);
-      setState(() {
-        _kayitlar = decoded.map((item) => IsKaydi.fromJson(item)).toList();
-        _kayitlar.sort((a, b) => b.tarih.compareTo(a.tarih));
-      });
+      if (mounted) {
+        setState(() {
+          _kayitlar = decoded.map((item) => IsKaydi.fromJson(item)).toList();
+          _kayitlar.sort((a, b) => b.girisZamani.compareTo(a.girisZamani));
+        });
+      }
     }
-    setState(() => _loading = false);
+  }
+
+  void _kayitKaydet(IsKaydi kayit) {
+    setState(() {
+      final index = _kayitlar.indexWhere((e) => e.id == kayit.id);
+      if (index != -1) {
+        _kayitlar[index] = kayit;
+      } else {
+        _kayitlar.add(kayit);
+      }
+      _kayitlar.sort((a, b) => b.girisZamani.compareTo(a.girisZamani));
+    });
+    _verileriKaydet();
+  }
+
+  void _kayitSil(String id) {
+    setState(() => _kayitlar.removeWhere((e) => e.id == id));
+    _verileriKaydet();
   }
 
   Future<void> _verileriKaydet() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
-      'yevmiye_v2',
+      'mesai_v7',
       json.encode(_kayitlar.map((e) => e.toJson()).toList()),
     );
   }
 
-  // Bu haftanın toplamını hesaplar
-  double get _haftalikToplam {
-    DateTime simdi = DateTime.now();
-    DateTime pzt = simdi.subtract(Duration(days: simdi.weekday - 1));
-    DateTime baslangic = DateTime(pzt.year, pzt.month, pzt.day);
-    return _kayitlar
-        .where(
-          (k) =>
-              k.tarih.isAfter(baslangic.subtract(const Duration(seconds: 1))),
-        )
-        .fold(0, (sum, item) => sum + item.toplamKazanc);
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF0F172A),
+      body: IndexedStack(
+        index: _seciliSayfa,
+        children: [
+          AnaSayfa(
+            kayitlar: _kayitlar,
+            onKaydet: _kayitKaydet,
+            onSil: _kayitSil,
+          ),
+          IstatistikSayfasi(kayitlar: _kayitlar),
+        ],
+      ),
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _seciliSayfa,
+        onTap: (i) => setState(() => _seciliSayfa = i),
+        backgroundColor: const Color(0xFF1E293B),
+        selectedItemColor: Colors.blueAccent,
+        unselectedItemColor: Colors.white54,
+        items: const [
+          BottomNavigationBarItem(
+            icon: Icon(Icons.list_rounded),
+            label: "Mesailer",
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.bar_chart_rounded),
+            label: "Analiz",
+          ),
+        ],
+      ),
+    );
   }
+}
+
+class AnaIskelet extends StatefulWidget {
+  const AnaIskelet({super.key});
+  @override
+  State<AnaIskelet> createState() => _AnaIskeletState();
+}
+
+class AnaSayfa extends StatelessWidget {
+  final List<IsKaydi> kayitlar;
+  final Function(IsKaydi) onKaydet;
+  final Function(String) onSil;
+
+  const AnaSayfa({
+    super.key,
+    required this.kayitlar,
+    required this.onKaydet,
+    required this.onSil,
+  });
 
   @override
   Widget build(BuildContext context) {
-    if (_loading)
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    double toplamGenel = kayitlar.fold(
+      0,
+      (sum, item) => sum + item.toplamKazanc,
+    );
 
     return Scaffold(
-      backgroundColor: Colors.grey[100],
+      backgroundColor: Colors.transparent,
       appBar: AppBar(
-        title: const Text("Yevmiye Takip"),
-        backgroundColor: const Color(0xFF2C3E50),
-        elevation: 0,
+        title: const Text("Mesai Takip", style: TextStyle(color: Colors.white)),
+        backgroundColor: Colors.transparent,
       ),
-      body: Column(
-        children: [
-          // Grafik Alanı
-          Container(
-            height: 230,
-            decoration: const BoxDecoration(
-              color: Color(0xFF2C3E50),
-              borderRadius: BorderRadius.only(
-                bottomLeft: Radius.circular(30),
-                bottomRight: Radius.circular(30),
+      body: CustomScrollView(
+        slivers: [
+          SliverToBoxAdapter(
+            child: SizedBox(
+              height: 200,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  PieChart(
+                    PieChartData(
+                      centerSpaceRadius: 50,
+                      sections: kayitlar.take(5).toList().asMap().entries.map((
+                        e,
+                      ) {
+                        return PieChartSectionData(
+                          color: Colors.blueAccent.withOpacity(
+                            0.5 + (e.key * 0.1),
+                          ),
+                          value: e.value.toplamKazanc,
+                          title: '',
+                          radius: 12,
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        "TOPLAM",
+                        style: TextStyle(color: Colors.white54, fontSize: 10),
+                      ),
+                      Text(
+                        "₺${toplamGenel.toStringAsFixed(0)}",
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ),
             ),
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                PieChart(
-                  PieChartData(sections: _getSections(), centerSpaceRadius: 60),
-                ),
-                Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Text(
-                      "HAFTALIK TOPLAM",
-                      style: TextStyle(color: Colors.white70, fontSize: 12),
-                    ),
-                    Text(
-                      "₺${_haftalikToplam.toStringAsFixed(0)}",
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 28,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
           ),
-          // Liste Alanı
-          Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.only(top: 10),
-              itemCount: _kayitlar.length,
-              itemBuilder: (context, index) {
-                final k = _kayitlar[index];
-                return Card(
-                  margin: const EdgeInsets.symmetric(
-                    horizontal: 15,
-                    vertical: 6,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: ListTile(
-                    onLongPress: () => _silmeOnayi(index),
-                    title: Text(
-                      DateFormat('EEEE, d MMMM', 'tr_TR').format(k.tarih),
-                      style: const TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    subtitle: Text(
-                      "${k.giris.format(context)} - ${k.cikis.format(context)} (${k.calismaSaati.toStringAsFixed(1)} Saat)",
-                    ),
-                    trailing: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text(
-                          "₺${k.toplamKazanc.toStringAsFixed(0)}",
-                          style: const TextStyle(
-                            color: Colors.green,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 18,
-                          ),
-                        ),
-                        if (k.gemiPrimi > 0)
-                          Text(
-                            "+₺${k.gemiPrimi.toStringAsFixed(0)} prim",
-                            style: const TextStyle(
-                              fontSize: 10,
-                              color: Colors.grey,
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                );
-              },
+          SliverPadding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            sliver: SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (context, i) => _card(context, kayitlar[i]),
+                childCount: kayitlar.length,
+              ),
             ),
           ),
         ],
       ),
       floatingActionButton: FloatingActionButton(
-        backgroundColor: const Color(0xFF2C3E50),
-        onPressed: () => _yeniEkle(context),
+        onPressed: () => _modal(context),
+        backgroundColor: Colors.blueAccent,
         child: const Icon(Icons.add, color: Colors.white),
       ),
     );
   }
 
-  void _silmeOnayi(int index) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("Kaydı Sil?"),
-        content: const Text("Bu yevmiye kaydı kalıcı olarak silinecektir."),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text("Vazgeç"),
+  Widget _card(BuildContext context, IsKaydi k) {
+    return Dismissible(
+      key: Key(k.id),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 20),
+        decoration: BoxDecoration(
+          color: Colors.redAccent,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: const Icon(Icons.delete, color: Colors.white),
+      ),
+      onDismissed: (_) => onSil(k.id),
+      child: Card(
+        color: const Color(0xFF1E293B),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: ListTile(
+          onTap: () => _modal(context, mevcut: k),
+          title: Text(
+            DateFormat('d MMMM EEEE', 'tr_TR').format(k.girisZamani),
+            style: const TextStyle(color: Colors.white),
           ),
-          TextButton(
-            onPressed: () {
-              setState(() => _kayitlar.removeAt(index));
-              _verileriKaydet();
-              Navigator.pop(ctx);
-            },
-            child: const Text("Sil", style: TextStyle(color: Colors.red)),
+          // İSTEDİĞİN GÜNCELLEME: SAAT VE TOPLAM SÜRE
+          subtitle: Text(
+            "${DateFormat('HH:mm').format(k.girisZamani)} - ${DateFormat('HH:mm').format(k.cikisZamani)} (${k.calismaSaati.toStringAsFixed(1)} sa)",
+            style: const TextStyle(color: Colors.white54),
           ),
-        ],
+          trailing: Text(
+            "₺${k.toplamKazanc.toStringAsFixed(0)}",
+            style: const TextStyle(
+              color: Colors.greenAccent,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
       ),
     );
   }
 
-  void _yeniEkle(BuildContext context) {
-    DateTime secilenTarih = DateTime.now();
-    TimeOfDay g = const TimeOfDay(hour: 12, minute: 00);
-    TimeOfDay c = const TimeOfDay(hour: 20, minute: 00);
-    final ucretC = TextEditingController(text: "170");
-    final primC = TextEditingController(text: "0");
+  void _modal(BuildContext context, {IsKaydi? mevcut}) {
+    DateTime gT = mevcut?.girisZamani ?? DateTime.now();
+    DateTime cT =
+        mevcut?.cikisZamani ?? DateTime.now().add(const Duration(hours: 8));
+    final uC = TextEditingController(
+      text: mevcut?.saatlikUcret.toStringAsFixed(0) ?? "170",
+    );
+    final pC = TextEditingController(
+      text: mevcut?.gemiPrimi.toStringAsFixed(0) ?? "180",
+    );
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      backgroundColor: const Color(0xFF1E293B),
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(25)),
       ),
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setM) => Padding(
           padding: EdgeInsets.only(
             bottom: MediaQuery.of(ctx).viewInsets.bottom,
             top: 20,
-            left: 20,
-            right: 20,
+            left: 25,
+            right: 25,
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               const Text(
-                "İş Girişi",
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-              ListTile(
-                title: Text(
-                  "Tarih: ${DateFormat('d MMMM yyyy', 'tr_TR').format(secilenTarih)}",
+                "Mesai Bilgisi",
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
                 ),
-                trailing: const Icon(Icons.calendar_today),
-                onTap: () async {
-                  final d = await showDatePicker(
-                    context: context,
-                    initialDate: secilenTarih,
-                    firstDate: DateTime(2025),
-                    lastDate: DateTime(2030),
-                  );
-                  if (d != null) setM(() => secilenTarih = d);
-                },
               ),
+              _dt(ctx, "Giriş", gT, (nd) => setM(() => gT = nd)),
+              _dt(ctx, "Çıkış", cT, (nd) => setM(() => cT = nd)),
+              TextField(
+                controller: uC,
+                keyboardType: TextInputType.number,
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(labelText: "Saatlik Ücret"),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: pC,
+                keyboardType: TextInputType.number,
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(labelText: "Gemi Primi"),
+              ),
+              const SizedBox(height: 10),
               Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: [
-                  Expanded(
-                    child: ListTile(
-                      title: Text("Giriş: ${g.format(context)}"),
-                      onTap: () async {
-                        final t = await showTimePicker(
-                          context: context,
-                          initialTime: g,
-                        );
-                        if (t != null) setM(() => g = t);
-                      },
-                    ),
+                  ChoiceChip(
+                    label: const Text("180₺"),
+                    selected: pC.text == "180",
+                    onSelected: (s) => setM(() => pC.text = "180"),
                   ),
-                  Expanded(
-                    child: ListTile(
-                      title: Text("Çıkış: ${c.format(context)}"),
-                      onTap: () async {
-                        final t = await showTimePicker(
-                          context: context,
-                          initialTime: c,
-                        );
-                        if (t != null) setM(() => c = t);
-                      },
-                    ),
+                  ChoiceChip(
+                    label: const Text("220₺"),
+                    selected: pC.text == "220",
+                    onSelected: (s) => setM(() => pC.text = "220"),
                   ),
                 ],
               ),
-              TextField(
-                controller: ucretC,
-                decoration: const InputDecoration(
-                  labelText: 'Saatlik Ücret (₺)',
+              const SizedBox(height: 20),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blueAccent,
+                  minimumSize: const Size(double.infinity, 50),
                 ),
-                keyboardType: TextInputType.number,
-              ),
-              TextField(
-                controller: primC,
-                decoration: const InputDecoration(
-                  labelText: 'Gemi Bitirme Primi (₺)',
-                ),
-                keyboardType: TextInputType.number,
-              ),
-              const SizedBox(height: 25),
-              SizedBox(
-                width: double.infinity,
-                height: 50,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF2C3E50),
-                  ),
-                  onPressed: () {
-                    setState(() {
-                      _kayitlar.add(
-                        IsKaydi(
-                          tarih: secilenTarih,
-                          giris: g,
-                          cikis: c,
-                          saatlikUcret: double.tryParse(ucretC.text) ?? 0,
-                          gemiPrimi: double.tryParse(primC.text) ?? 0,
-                        ),
-                      );
-                      _kayitlar.sort((a, b) => b.tarih.compareTo(a.tarih));
-                    });
-                    _verileriKaydet();
-                    Navigator.pop(ctx);
-                  },
-                  child: const Text(
-                    "KAYDET",
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
+                onPressed: () {
+                  onKaydet(
+                    IsKaydi(
+                      id:
+                          mevcut?.id ??
+                          DateTime.now().millisecondsSinceEpoch.toString(),
+                      girisZamani: gT,
+                      cikisZamani: cT,
+                      saatlikUcret: double.tryParse(uC.text) ?? 170,
+                      gemiPrimi: double.tryParse(pC.text) ?? 0,
                     ),
-                  ),
-                ),
+                  );
+                  Navigator.pop(ctx);
+                },
+                child: const Text("KAYDET"),
               ),
               const SizedBox(height: 20),
             ],
@@ -377,53 +381,218 @@ class _YevmiyeTakipAppState extends State<YevmiyeTakipApp> {
     );
   }
 
-  List<PieChartSectionData> _getSections() {
-    final haftalik = _kayitlar.where((k) {
-      DateTime pzt = DateTime.now().subtract(
-        Duration(days: DateTime.now().weekday - 1),
-      );
-      return k.tarih.isAfter(
-        DateTime(
-          pzt.year,
-          pzt.month,
-          pzt.day,
-        ).subtract(const Duration(seconds: 1)),
-      );
-    }).toList();
+  Widget _dt(
+    BuildContext context,
+    String l,
+    DateTime d,
+    Function(DateTime) os,
+  ) {
+    return ListTile(
+      title: Text(
+        l,
+        style: const TextStyle(color: Colors.white54, fontSize: 12),
+      ),
+      subtitle: Text(
+        DateFormat('d MMMM, HH:mm', 'tr_TR').format(d),
+        style: const TextStyle(color: Colors.white),
+      ),
+      onTap: () async {
+        final date = await showDatePicker(
+          context: context,
+          initialDate: d,
+          firstDate: DateTime(2025),
+          lastDate: DateTime(2030),
+          locale: const Locale('tr', 'TR'), // TAKVİM BURADA DA TÜRKÇELEŞTİ
+        );
+        if (!context.mounted) return;
+        if (date != null) {
+          final time = await showTimePicker(
+            context: context,
+            initialTime: TimeOfDay.fromDateTime(d),
+            builder: (context, child) => Theme(
+              data: ThemeData.dark().copyWith(
+                colorScheme: const ColorScheme.dark(primary: Colors.blueAccent),
+              ),
+              child: child!,
+            ),
+          );
+          if (!context.mounted) return;
+          if (time != null) {
+            os(
+              DateTime(date.year, date.month, date.day, time.hour, time.minute),
+            );
+          }
+        }
+      },
+    );
+  }
+}
 
-    if (haftalik.isEmpty)
-      return [PieChartSectionData(value: 1, title: '', color: Colors.white12)];
+class IstatistikSayfasi extends StatefulWidget {
+  final List<IsKaydi> kayitlar;
+  const IstatistikSayfasi({super.key, required this.kayitlar});
 
-    Map<int, double> gunler = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0};
-    for (var k in haftalik) {
-      gunler[k.tarih.weekday] = (gunler[k.tarih.weekday] ?? 0) + k.toplamKazanc;
+  @override
+  State<IstatistikSayfasi> createState() => _IstatistikSayfasiState();
+}
+
+class _IstatistikSayfasiState extends State<IstatistikSayfasi> {
+  DateTimeRange? _seciliAralik;
+
+  @override
+  Widget build(BuildContext context) {
+    List<IsKaydi> filtrelenmis = widget.kayitlar;
+    if (_seciliAralik != null) {
+      filtrelenmis = widget.kayitlar.where((k) {
+        return k.girisZamani.isAfter(
+              _seciliAralik!.start.subtract(const Duration(seconds: 1)),
+            ) &&
+            k.girisZamani.isBefore(
+              _seciliAralik!.end.add(const Duration(days: 1)),
+            );
+      }).toList();
+    } else {
+      filtrelenmis = widget.kayitlar
+          .where((k) => k.girisZamani.month == DateTime.now().month)
+          .toList();
     }
 
-    List<Color> renkler = [
-      Colors.blue,
-      Colors.green,
-      Colors.orange,
-      Colors.purple,
-      Colors.red,
-      Colors.cyan,
-      Colors.yellow,
-    ];
-    return gunler.entries
-        .where((e) => e.value > 0)
-        .map(
-          (e) => PieChartSectionData(
-            color: renkler[e.key - 1],
-            value: e.value,
-            radius: 50,
-            title:
-                '${DateFormat('E', 'tr_TR').format(DateTime(2024, 1, e.key + 1))}\n₺${e.value.toStringAsFixed(0)}',
-            titleStyle: const TextStyle(
-              fontSize: 9,
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
+    double toplamPara = filtrelenmis.fold(
+      0,
+      (sum, item) => sum + item.toplamKazanc,
+    );
+    double toplamSaat = filtrelenmis.fold(
+      0,
+      (sum, item) => sum + item.calismaSaati,
+    );
+
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      appBar: AppBar(
+        title: const Text(
+          "Analiz ve Filtre",
+          style: TextStyle(color: Colors.white),
+        ),
+        backgroundColor: Colors.transparent,
+        actions: [
+          if (_seciliAralik != null)
+            IconButton(
+              icon: const Icon(Icons.close, color: Colors.redAccent),
+              onPressed: () => setState(() => _seciliAralik = null),
             ),
+          IconButton(
+            icon: const Icon(Icons.date_range, color: Colors.blueAccent),
+            onPressed: () async {
+              final range = await showDateRangePicker(
+                context: context,
+                firstDate: DateTime(2025),
+                lastDate: DateTime(2030),
+                locale: const Locale('tr', 'TR'), // ANALİZ TAKVİMİ TÜRKÇE
+                builder: (context, child) => Theme(
+                  data: ThemeData.dark().copyWith(
+                    colorScheme: const ColorScheme.dark(
+                      primary: Colors.blueAccent,
+                      surface: Color(0xFF1E293B),
+                    ),
+                  ),
+                  child: child!,
+                ),
+              );
+              if (range != null) setState(() => _seciliAralik = range);
+            },
           ),
-        )
-        .toList();
+        ],
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(25),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1E293B),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: Colors.blueAccent.withOpacity(0.2)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _seciliAralik == null
+                        ? "BU AYIN TOPLAMI"
+                        : "SEÇİLİ ARALIK TOPLAMI",
+                    style: const TextStyle(color: Colors.white54, fontSize: 12),
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    "₺${toplamPara.toStringAsFixed(0)}",
+                    style: const TextStyle(
+                      color: Colors.greenAccent,
+                      fontSize: 32,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 15),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      _ozetBilgi(
+                        "Toplam Saat",
+                        "${toplamSaat.toStringAsFixed(1)} sa",
+                      ),
+                      _ozetBilgi("Mesai Sayısı", "${filtrelenmis.length} gün"),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+            Expanded(
+              child: ListView.builder(
+                itemCount: filtrelenmis.length,
+                itemBuilder: (context, i) {
+                  final k = filtrelenmis[i];
+                  return ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(
+                      DateFormat('d MMMM', 'tr_TR').format(k.girisZamani),
+                      style: const TextStyle(color: Colors.white70),
+                    ),
+                    trailing: Text(
+                      "₺${k.toplamKazanc.toStringAsFixed(0)}",
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _ozetBilgi(String baslik, String deger) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          baslik,
+          style: const TextStyle(color: Colors.white38, fontSize: 11),
+        ),
+        Text(
+          deger,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 16,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
+    );
   }
 }

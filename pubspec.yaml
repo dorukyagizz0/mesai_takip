@@ -10,22 +10,24 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-
-  cupertino_icons: ^1.0.8
-  # Veri görselleştirme için
-  fl_chart: ^0.66.0 
-  # Dil ve tarih formatları için
-  intl: ^0.19.0
-  # Verileri telefona kaydetmek için
+  flutter_localizations:
+    sdk: flutter
+  intl: 0.20.2
+  fl_chart: ^0.66.0
   shared_preferences: ^2.2.2
 
 dev_dependencies:
+  flutter_lints: ^6.0.0
   flutter_test:
     sdk: flutter
-  flutter_lints: ^3.0.0
+  flutter_launcher_icons: ^0.13.1 # Paket buraya eklendi
+
+# BU KISIM EN SOLDA OLMALI (Hizalamayı düzelttim)
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "icon.png"
+  remove_alpha_ios: true
 
 flutter:
   uses-material-design: true
-  # Eğer ileride ikon veya resim eklersen burayı kullanacağız
-  # assets:
-  #   - assets/images/
